@@ -10,7 +10,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from openai import OpenAI
 import uvicorn
+import dotenv
 
+
+dotenv.load_dotenv()
 
 app = FastAPI(title="Skin Analyzer API", version="1.0.0")
 
@@ -20,8 +23,8 @@ def get_client(api_key: Optional[str] = None, base_url: Optional[str] = None) ->
     either via parameters or environment variables. This avoids hard-coded endpoints.
     """
     # Use environment variable for API key if not provided
-    key = api_key or os.getenv("OPENROUTER_API_KEY", "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")
-    base = base_url or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    key = api_key or os.getenv("OPENROUTER_API_KEY")
+    base = base_url or os.getenv("OPENROUTER_BASE_URL")
     if not key:
         raise ValueError("OpenRouter API key not set. Please set the OPENROUTER_API_KEY environment variable.")
     return OpenAI(base_url=base, api_key=key)
