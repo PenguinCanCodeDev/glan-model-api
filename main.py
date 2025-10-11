@@ -477,5 +477,6 @@ async def diagnosis_result(request: Request) -> JSONResponse:
     
 
 if __name__ == "__main__":
-    # Run this module directly (correct target 'm:app')
-    uvicorn.run("m:app", host="0.0.0.0", port=8000, reload=True)
+    # Run this module directly (correct target 'main:app')
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
