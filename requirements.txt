@@ -3,3 +3,8 @@ uvicorn
 openai
 pydantic
 python-dotenv
+sentence-transformers
+faiss-cpu
+numpy
+pydantic
+python-dotenv

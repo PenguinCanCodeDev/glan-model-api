@@ -5,17 +5,75 @@ import os
 import threading
 import re
 from typing import Optional, List
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Form, Body, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from openai import OpenAI
 import uvicorn
 import dotenv
+from dotenv import find_dotenv
+# Embedding and vector DB imports
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
 
+# Always load .env from the project root or parent directories
+dotenv_path = find_dotenv(usecwd=True)
+if dotenv_path:
+    dotenv.load_dotenv(dotenv_path, override=True)
+else:
+    dotenv.load_dotenv(override=True)
 
-dotenv.load_dotenv()
+DEFAULT_OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
 
 app = FastAPI(title="Skin Analyzer API", version="1.0.0")
+
+# Sentence Transformer model for embeddings
+EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
+embed_model = SentenceTransformer(EMBED_MODEL_NAME)
+VECTOR_DIM = 384  # all-MiniLM-L6-v2 output dim
+# FAISS vector DB (in-memory)
+faiss_index = faiss.IndexFlatL2(VECTOR_DIM)
+vector_metadata = []  # Store metadata for each vector
+
+# Request schemas
+class EmbedRequest(BaseModel):
+    text: str
+
+class RefineRequest(BaseModel):
+    text: str
+    metadata: dict = {}
+
+class SearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+# Endpoint: Embed text to vector
+@app.post("/embed")
+async def embed_text(request: EmbedRequest):
+    embedding = embed_model.encode(request.text)
+    return {"embedding": embedding.tolist()}
+
+# Endpoint: Refine and store embedding
+@app.post("/refine")
+async def refine_text(request: RefineRequest):
+    embedding = embed_model.encode(request.text)
+    faiss_index.add(np.array([embedding]).astype("float32"))
+    vector_metadata.append(request.metadata)
+    return {"message": "Refined and stored", "embedding": embedding.tolist()}
+
+# Endpoint: Semantic search
+@app.post("/search")
+async def search_vectors(request: SearchRequest):
+    query_emb = embed_model.encode(request.query)
+    D, I = faiss_index.search(np.array([query_emb]).astype("float32"), request.top_k)
+    results = []
+    for idx in I[0]:
+        if idx < len(vector_metadata):
+            results.append(vector_metadata[idx])
+    return {"results": results}
 
 
 def get_client(api_key: Optional[str] = None, base_url: Optional[str] = None) -> OpenAI:
@@ -24,7 +82,8 @@ def get_client(api_key: Optional[str] = None, base_url: Optional[str] = None) ->
     """
     # Use environment variable for API key if not provided
     key = api_key or os.getenv("OPENROUTER_API_KEY")
-    base = base_url or os.getenv("OPENROUTER_BASE_URL")
+    # Always prefer: explicit base_url param -> env var -> default
+    base = base_url or os.getenv("OPENROUTER_BASE_URL") or DEFAULT_OPENROUTER_BASE_URL
     if not key:
         raise ValueError("OpenRouter API key not set. Please set the OPENROUTER_API_KEY environment variable.")
     return OpenAI(base_url=base, api_key=key)
@@ -293,9 +352,9 @@ async def conversation_endpoint(request: Request) -> JSONResponse:
         composite += f"Summary: {summary_note}\n"
     composite += f"User: {user_input_clean}"
 
-    chosen_model = model_val or os.environ.get("OPENROUTER_CHAT_MODEL", "openai/gpt-oss-20b:free")
+    chosen_model = model_val or os.getenv("OPENROUTER_CHAT_MODEL", "openai/gpt-oss-20b:free")
     try:
-        client = get_client(api_key_val, base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"))
+        client = get_client(api_key_val)
         completion = client.chat.completions.create(
             extra_body={},
             model=chosen_model,
@@ -479,7 +538,7 @@ async def diagnosis_result(request: Request) -> JSONResponse:
         return JSONResponse(status_code=500, content={"error": str(e)})
     
 
+
 if __name__ == "__main__":
     # Run this module directly (correct target 'main:app')
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
